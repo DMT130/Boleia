@@ -7,6 +7,7 @@ class UserRole(str, Enum):
     DRIVER = "DRIVER"
     PASSENGER = "PASSENGER"
     BOTH = "BOTH"
+    ADMIN = "ADMIN"
 
 class RideStatus(str, Enum):
     SCHEDULED = "SCHEDULED"
@@ -117,7 +118,8 @@ class VehicleBase(BaseModel):
     insurance_document: Optional[str] = None
 
 class VehicleCreate(VehicleBase):
-    owner_id: int
+    #owner_id: int
+    pass
 
 class VehicleUpdate(BaseModel):
     make: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
@@ -298,7 +300,7 @@ class ReviewBase(BaseModel):
     comment: Optional[str] = None
 
 class ReviewCreate(ReviewBase):
-    pass
+    ride_id: int
 
 class ReviewUpdate(BaseModel):
     rating: Optional[int] = None
@@ -386,3 +388,11 @@ class GroupMemberPublic(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    email: str

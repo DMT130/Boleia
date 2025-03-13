@@ -8,14 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from pydantic import ValidationError
 from shapely.wkb import loads as wkb_loads
 from geoalchemy2.shape import to_shape
+from routers.user_auth_api_router import get_current_active_user, check_admin_rights, get_current_user
 
 router = APIRouter()
 
 @router.post("/bookings/", response_model=schemas.BookingPublic, status_code=status.HTTP_201_CREATED)
-def create_booking(booking: schemas.BookingCreate, db: Session = Depends(get_db)):
+def create_booking(booking: schemas.BookingCreate, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     booking_data = booking.dict()
     booking_data['pickup_location'] = utils.to_wkt(booking_data['pickup_location'], "POINT")
     booking_data['dropoff_location'] = utils.to_wkt(booking_data['dropoff_location'], "POINT")
+    booking_data['passenger_id'] = current_user.id
     
     db_booking = routers.Booking(**booking_data)
     try:
@@ -42,9 +44,10 @@ def create_booking(booking: schemas.BookingCreate, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 @router.get("/bookings/", response_model=List[schemas.BookingPublic])
-def read_bookings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def read_bookings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     try:
-        bookings = db.query(routers.Booking).offset(skip).limit(limit).all()
+        bookings = db.query(routers.Booking).filter(routers.Booking.passenger_id == current_user.id).offset(skip).limit(limit).all()
+
         return [{
                     "id": db_booking.id,
                     "ride_id": db_booking.ride_id,
@@ -58,11 +61,14 @@ def read_bookings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 @router.get("/bookings/{booking_id}", response_model=schemas.BookingPublic)
-def read_booking(booking_id: int, db: Session = Depends(get_db)):
+def read_booking(booking_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     try:
         db_booking = db.query(routers.Booking).filter(routers.Booking.id == booking_id).first()
         if db_booking is None:
             raise HTTPException(status_code=404, detail="Booking not found")
+        db_ride = db.query(routers.Ride).filter(routers.Ride.id == db_booking.ride_id).first()
+        if current_user.id not in [db_booking.passenger_id, db_ride.driver_id]:
+            raise HTTPException(status_code=403, detail="You can only update your own rides")
         return {
                     "id": db_booking.id,
                     "ride_id": db_booking.ride_id,
@@ -77,10 +83,13 @@ def read_booking(booking_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/bookings/{booking_id}", response_model=schemas.BookingPublic)
-def update_booking(booking_id: int, booking: schemas.BookingUpdate, db: Session = Depends(get_db)):
+def update_booking(booking_id: int, booking: schemas.BookingUpdate, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     db_booking = db.query(routers.Booking).filter(routers.Booking.id == booking_id).first()
     if db_booking is None:
         raise HTTPException(status_code=404, detail="Booking not found")
+    db_ride = db.query(routers.Ride).filter(routers.Ride.id == db_booking.ride_id).first()
+    if current_user.id not in [db_booking.passenger_id, db_ride.driver_id]:
+        raise HTTPException(status_code=403, detail="You can only update your own rides")
 
     booking_data = booking.dict(exclude_unset=True)
 
@@ -123,10 +132,12 @@ def update_booking(booking_id: int, booking: schemas.BookingUpdate, db: Session 
 
 
 @router.delete("/bookings/{booking_id}", response_model=dict)
-def delete_booking(booking_id: int, db: Session = Depends(get_db)):
+def delete_booking(booking_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     db_booking = db.query(routers.Booking).filter(routers.Booking.id == booking_id).first()
     if db_booking is None:
         raise HTTPException(status_code=404, detail="Booking not found")
+    if current_user.id != db_booking.passenger_id:
+         raise HTTPException(status_code=403, detail="You can only delete your own bookings")
     try:
         db.delete(db_booking)
         db.commit()

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from database import engine, Base
 from routers import (user_api_router, booking_api_router, group_api_router,
                      group_member_api_router, review_api_router,
-                     rides_api_router, vehicles_api_router
+                     rides_api_router, vehicles_api_router, user_auth_api_router
                      #,payment_api_router
                      )
 
@@ -18,6 +18,7 @@ app.mount("/IdentityPicture", StaticFiles(directory="IdentityPicture"), name="Id
 app.mount("/DriverPicture", StaticFiles(directory="DriverPicture"), name="DriverPicture")
 
 # Include routers with tags
+app.include_router(user_auth_api_router.router, tags=["Login"])
 app.include_router(user_api_router.router, tags=["Users"])
 app.include_router(vehicles_api_router.router, tags=["Vehicles"])
 app.include_router(rides_api_router.router, tags=["Rides"])

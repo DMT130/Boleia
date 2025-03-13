@@ -11,6 +11,7 @@ class UserRole(str, enum.Enum):
     DRIVER = "DRIVER"
     PASSENGER = "PASSENGER"
     BOTH = "BOTH"
+    ADMIN = "ADMIN"
 
 class RideStatus(str, enum.Enum):
     SCHEDULED = "SCHEDULED"

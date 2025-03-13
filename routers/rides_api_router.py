@@ -9,15 +9,17 @@ from sqlalchemy.exc import IntegrityError
 from geoalchemy2.shape import to_shape
 from shapely.wkb import loads as wkb_loads
 from shapely.wkt import loads as wkt_loads, dumps as wkt_dumps
+from routers.user_auth_api_router import get_current_active_user, check_admin_rights, get_current_user
 
 router = APIRouter()
 
 @router.post("/rides/", response_model=schemas.RidePublic, status_code=status.HTTP_201_CREATED)
-def create_ride(ride: schemas.RideCreate, db: Session = Depends(get_db)):
+def create_ride(ride: schemas.RideCreate, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     ride_data = ride.dict()
     ride_data['start_location'] = utils.to_wkt(ride_data['start_location'], "POINT")
     ride_data['end_location'] = utils.to_wkt(ride_data['end_location'], "POINT")
     ride_data['waypoints'] = utils.to_wkt(ride_data['waypoints'], "LINESTRING")
+    ride_data['driver_id'] = current_user.id
     
     db_ride = routers.Ride(**ride_data)
 
@@ -87,11 +89,12 @@ def read_ride(ride_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 @router.put("/rides/{ride_id}", response_model=schemas.RidePublic)
-def update_ride(ride_id: int, ride: schemas.RideUpdate, db: Session = Depends(get_db)):
+def update_ride(ride_id: int, ride: schemas.RideUpdate, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     db_ride = db.query(routers.Ride).filter(routers.Ride.id == ride_id).first()
     if db_ride is None:
         raise HTTPException(status_code=404, detail="Ride not found")
-
+    if current_user.id != db_ride.driver_id:
+         raise HTTPException(status_code=403, detail="You can only update your own rides")
     ride_data = ride.dict(exclude_unset=True)
 
     # Tratamento especial para localização
@@ -133,10 +136,12 @@ def update_ride(ride_id: int, ride: schemas.RideUpdate, db: Session = Depends(ge
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.delete("/rides/{ride_id}", response_model=dict)
-def delete_ride(ride_id: int, db: Session = Depends(get_db)):
+def delete_ride(ride_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_active_user)):
     db_ride = db.query(routers.Ride).filter(routers.Ride.id == ride_id).first()
     if db_ride is None:
         raise HTTPException(status_code=404, detail="Ride not found")
+    if current_user.id != db_ride.driver_id:
+         raise HTTPException(status_code=403, detail="You can only delete your own rides")
     try:
         db.delete(db_ride)
         db.commit()

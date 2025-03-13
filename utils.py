@@ -3,7 +3,36 @@ from geoalchemy2.shape import to_shape
 from shapely.geometry import mapping
 from geoalchemy2.elements import WKTElement
 from shapely.geometry import Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon
+from sqlalchemy.orm import Session
+import models
+import schemas
+from passlib.context import CryptContext
 
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+
+#find user_details by ID
+def get_user_by_id(db: Session, user_id: int):
+    try: 
+        user = db.query(models.User).filter(models.User.id == user_id).first()
+        return user
+    except:
+        return False
+
+def get_user_by_email(db: Session, email: str):
+    try:
+        user = db.query(models.User).filter(models.User.email == email).first()
+        return user
+    except:
+        return False
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

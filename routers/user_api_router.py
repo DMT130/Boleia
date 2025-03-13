@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 from typing import Dict, Optional
 import shutil
+from routers.user_auth_api_router import get_current_active_user, get_current_user, check_admin_rights
+
 
 UPLOAD_PROFILE_DIR = "ProfilePicture"
 UPLOAD_IDENTITY_DIR = "IdentityPicture"
@@ -96,7 +98,7 @@ async def create_user(
     
 
 @router.get("/users/", response_model=List[schemas.UserPublic])
-def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User=Depends(check_admin_rights)):
     try:
         users = db.query(routers.User).offset(skip).limit(limit).all()
         return users
@@ -104,7 +106,9 @@ def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Internal server error: {e}")
 
 @router.get("/users/{user_id}", response_model=schemas.UserPublic)
-def read_user(user_id: int, db: Session = Depends(get_db)):
+def read_user(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only read your own user")
     try:
         db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
         if db_user is None:
@@ -114,7 +118,9 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 @router.put("/users/{user_id}", response_model=schemas.UserPublic)
-def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(get_db)):
+def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only update your own user")
     db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -139,7 +145,9 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 @router.get("/users/identity_picture/{user_id}")
-async def read_identity_picture(user_id: int, db: Session = Depends(get_db)):
+async def read_identity_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only get you own id card")
     try:
         identity_id_file = db.query(routers.User).filter(routers.User.id == user_id).first()
         identity_id_file = identity_id_file.identity_id_file
@@ -150,7 +158,9 @@ async def read_identity_picture(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
     
 @router.get("/users/profile_picture/{user_id}")
-async def read_identity_picture(user_id: int, db: Session = Depends(get_db)):
+async def read_identity_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only get you own profile picture")
     try:
         profile_picture = db.query(routers.User).filter(routers.User.id == user_id).first()
         profile_picture = profile_picture.profile_image
@@ -162,7 +172,9 @@ async def read_identity_picture(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/users/driver_license_picture/{user_id}")
-async def read_identity_picture(user_id: int, db: Session = Depends(get_db)):
+async def read_identity_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only get you own driver license picture")
     try:
         driver_license_picture = db.query(routers.User).filter(routers.User.id == user_id).first()
         driver_license_picture = driver_license_picture.driver_license_file
@@ -173,7 +185,9 @@ async def read_identity_picture(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 @router.delete("/users/{user_id}", response_model=dict)
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only activate your own user")
     db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -187,11 +201,3 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
-
-@router.post("/users/login/", response_model=dict)
-def login_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(routers.User).filter(routers.User.email == user.email).first()
-    if db_user is None or not utils.verify_password(user.hashed_password, db_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    # Generate a JWT token or session here.
-    return {"message": "Login successful"}
