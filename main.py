@@ -16,6 +16,7 @@ app = FastAPI()
 app.mount("/ProfilePicture", StaticFiles(directory="ProfilePicture"), name="ProfilePicture")
 app.mount("/IdentityPicture", StaticFiles(directory="IdentityPicture"), name="IdentityPicture")
 app.mount("/DriverPicture", StaticFiles(directory="DriverPicture"), name="DriverPicture")
+app.mount("/CredelectPicture", StaticFiles(directory="CredelectPicture"), name="CredelectPicture")
 
 # Include routers with tags
 app.include_router(user_auth_api_router.router, tags=["Login"])

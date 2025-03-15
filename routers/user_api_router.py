@@ -13,15 +13,26 @@ from pathlib import Path
 from typing import Dict, Optional
 import shutil
 from routers.user_auth_api_router import get_current_active_user, get_current_user, check_admin_rights
+from email_verification import send_verification_email, generate_confirmation_code, check_confirmation_code_match, delete_confirmation_email
 
 
 UPLOAD_PROFILE_DIR = "ProfilePicture"
 UPLOAD_IDENTITY_DIR = "IdentityPicture"
 UPLOAD_DRIVER_LICENSE_DIR = "DriverPicture"
+UPLOAD_ELECTRICITY_BILL_DIR = "CredelectPicture"
 
 router = APIRouter()
 
 from fastapi import Form
+
+def update_user(db: Session, user: schemas.UserUpdate, user_data: schemas.User):
+    user = user.dict(exclude_unset=True)
+    for key, value in user.items():
+            setattr(user_data, key, value)
+    db.add(user_data)
+    db.commit()
+    db.refresh(user_data)
+    return user_data
 
 @router.post("/users/", response_model=schemas.UserPublic, status_code=201)
 async def create_user(
@@ -30,6 +41,7 @@ async def create_user(
     phone: Optional[str] = Form(None),
     identity_id: Optional[str] = Form(None),
     driver_license: Optional[str] = Form(None),
+    electricity_buill_id: Optional[str] = Form(None),
     role: schemas.UserRole = Form(...),
     user_is_verified: bool = Form(False),
     documents_is_verified: bool = Form(False),
@@ -37,6 +49,7 @@ async def create_user(
     profile_image: UploadFile = File(...),
     identity_id_file: UploadFile = File(...),
     driver_license_file: Optional[UploadFile] = File(None),
+    electricity_buill_file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
     # Check if email is already registered
@@ -67,6 +80,13 @@ async def create_user(
         with open(driver_license_file_path, "wb") as buffer:
             buffer.write(await driver_license_file.read())
         driver_license_file_url = f"DriverPicture/{filename}"  # Corrigindo URL absoluta
+    
+    if electricity_buill_file:
+        filename = f"{uuid4()}_{electricity_buill_file.filename}"  # Corrigindo erro de referência ao profile_image.filename
+        electricity_bill_file_path = Path(UPLOAD_ELECTRICITY_BILL_DIR) / filename
+        with open(electricity_bill_file_path, "wb") as buffer:
+            buffer.write(await electricity_buill_file.read())
+        electricity_bill_file = f"CredelectPicture/{filename}"  # Corrigindo URL absoluta
 
     # Criar novo usuário
     db_user = routers.User(
@@ -75,20 +95,25 @@ async def create_user(
         phone=phone,
         identity_id=identity_id,
         driver_license=driver_license,
+        electricity_buill_id=electricity_buill_id,
         role=role,
         user_is_verified=user_is_verified,
         documents_is_verified=documents_is_verified,
         hashed_password=hashed_password_hashed,
         profile_image=profile_image_url,
         identity_id_file=identity_id_file_url,
-        driver_license_file=driver_license_file_url
-    ) 
+        driver_license_file=driver_license_file_url,
+        electricity_buill_file=electricity_bill_file
+    )
 
     try:
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
-        return db_user
+        _, random_int = await generate_confirmation_code(db=db, user_id=db_user.id)
+        sent = await send_verification_email(email=db_user.email, confirmation_code=random_int)
+        if sent is True:
+            return db_user
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=400, detail="Database integrity error")
@@ -96,6 +121,30 @@ async def create_user(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
     
+@router.patch("/user/confirmation/{user_id}/{confirmation_code}", response_model=schemas.UserPublic)
+def activate_user(
+    user_id: int,
+    confirmation_code: int,
+    user_sch: schemas.UserActivation,
+    current_user: schemas.User = Depends(get_current_user),  # Move this up
+    db: Session = Depends(get_db)
+    ):
+     if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only activate you own user")
+     db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
+     if not db_user:
+        raise HTTPException(status_code=404, detail="user not found")
+
+     confirmation, confirmation_obj = check_confirmation_code_match(db, user_id=user_id, confirmation_code=confirmation_code)
+     if confirmation is True:
+        result = update_user(db, user_sch, db_user)
+     else:
+         raise HTTPException(status_code=403, detail="The confirmation code does not match")
+     deleted_confirmation_code = delete_confirmation_email(db, confirmation_obj)
+     if deleted_confirmation_code is True:
+         return result
+     else:
+         raise HTTPException(status_code=403, detail="confirmation code was not deleted")
 
 @router.get("/users/", response_model=List[schemas.UserPublic])
 def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User=Depends(check_admin_rights)):
@@ -158,7 +207,7 @@ async def read_identity_picture(user_id: int, db: Session = Depends(get_db), cur
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
     
 @router.get("/users/profile_picture/{user_id}")
-async def read_identity_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+async def read_profile_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
     if current_user.id != user_id:
          raise HTTPException(status_code=403, detail="You can only get you own profile picture")
     try:
@@ -172,7 +221,7 @@ async def read_identity_picture(user_id: int, db: Session = Depends(get_db), cur
 
 
 @router.get("/users/driver_license_picture/{user_id}")
-async def read_identity_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+async def read_driver_license_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
     if current_user.id != user_id:
          raise HTTPException(status_code=403, detail="You can only get you own driver license picture")
     try:
@@ -181,6 +230,20 @@ async def read_identity_picture(user_id: int, db: Session = Depends(get_db), cur
         if driver_license_picture is None:
             raise HTTPException(status_code=404, detail="driver license picture file not found")
         return FileResponse(driver_license_picture)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+
+@router.get("/users/credelect_picture/{user_id}")
+async def read_credelect_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only get you own driver license picture")
+    try:
+        user_data = db.query(routers.User).filter(routers.User.id == user_id).first()
+        electricity_buill_file = user_data.electricity_buill_file
+        if electricity_buill_file is None:
+            raise HTTPException(status_code=404, detail="driver license picture file not found")
+        return FileResponse(electricity_buill_file)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from geoalchemy2 import Geometry
+from datetime import timedelta, datetime
 import enum
 from database import Base
 
@@ -41,12 +42,14 @@ class User(Base):
     phone = Column(String(20), unique=True)
     identity_id = Column(String(100), nullable=False, unique=True)
     driver_license = Column(String(100), nullable=True, unique=True)
+    electricity_buill_id = Column(String(100), nullable=True, unique=True)
     role = Column(Enum(UserRole), default=UserRole.BOTH)
     user_is_verified = Column(Boolean, default=False)
     documents_is_verified = Column(Boolean, default=False)
     profile_image = Column(Text, nullable=True)
     identity_id_file = Column(Text, nullable=True)
     driver_license_file = Column(Text, nullable=True)
+    electricity_buill_file = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
     
@@ -57,6 +60,20 @@ class User(Base):
     reviews_given = relationship("Review", foreign_keys="Review.reviewer_id", back_populates="reviewer")
     reviews_received = relationship("Review", foreign_keys="Review.reviewee_id", back_populates="reviewee")
     groups = relationship("GroupMember", back_populates="user")
+    email_confirmations = relationship("EmailConfirmation", back_populates="user")
+
+class EmailConfirmation(Base):
+    __tablename__ = "email_confirmations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    confirmation_code = Column(String(255), nullable=False)
+    expires_at = datetime.now() + timedelta(minutes=15)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    used = Column(Boolean, default=False, nullable=False)
+
+    # Relationship (optional)
+    user = relationship("User", back_populates="email_confirmations")  # Assuming a User model exists
 
 class Vehicle(Base):
     __tablename__ = "vehicles"
@@ -70,8 +87,11 @@ class Vehicle(Base):
     license_plate = Column(String(20), unique=True, nullable=False)
     capacity = Column(Integer, nullable=False)
     insurance_document = Column(String(255))  # URL to document
+    car_registraction_file = Column(Text, nullable=True)
+    car_owership_file = Column(Text, nullable=True)
+    car_photos = Column(JSONB, nullable=True, default=[])  # Updated to JSONB
     created_at = Column(DateTime, server_default=func.now())
-    
+
     owner = relationship("User", back_populates="vehicles")
     rides = relationship("Ride", back_populates="vehicle")
 

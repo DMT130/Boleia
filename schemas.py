@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, HttpUrl, constr, Field, conlist, Field, Json, conint, StringConstraints
+from pydantic import BaseModel, EmailStr, Field, StringConstraints
 from typing import Optional, List, Dict, Any, Annotated
 from datetime import datetime
 from enum import Enum
@@ -32,12 +32,14 @@ class UserBase(BaseModel):
     phone: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
     identity_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
     driver_license: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+    electricity_buill_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
     role: UserRole = UserRole.BOTH
     user_is_verified: bool = False
     documents_is_verified: bool = False
     profile_image: Optional[str] = None
     identity_id_file: Optional[str] = None
     driver_license_file: Optional[str] = None
+    electricity_buill_file: Optional[str] = None
 
 class UserCreate(UserBase):
     hashed_password: str
@@ -51,7 +53,12 @@ class UserCreate(UserBase):
             data["identity_id_file"] = str(self.identity_id_file)
         if self.driver_license_file:
             data["driver_license_file"] = str(self.driver_license_file)
+        if self.driver_license_file:
+            data["electricity_buill_file"] = str(self.driver_license_file)
         return data
+    
+class UserActivation(BaseModel):
+    user_is_verified: Optional[bool] = None
 
 class UserUpdate(BaseModel):
     full_name: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
@@ -59,11 +66,13 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     identity_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
     driver_license: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+    electricity_buill_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
     user_is_verified: Optional[bool] = None
     documents_is_verified: Optional[bool] = None
     profile_image: Optional[str] = None
     identity_id_file: Optional[str] = None
     driver_license_file: Optional[str] = None
+    electricity_buill_file: Optional[str] = None
 
     def dict(self, **kwargs):
         data = super().dict(**kwargs)
@@ -96,12 +105,14 @@ class UserPublic(BaseModel):
     phone: Optional[str] = None
     identity_id: str
     driver_license: Optional[str] = None
+    electricity_buill_file: Optional[str] = None
     role: UserRole
     user_is_verified: bool
     documents_is_verified: bool
     profile_image: Optional[str] = None
     identity_id_file: Optional[str] = None
     driver_license_file: Optional[str] = None
+    electricity_buill_file: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -109,26 +120,27 @@ class UserPublic(BaseModel):
 
 #Vehicle
 class VehicleBase(BaseModel):
-    make: Optional[Annotated[str, StringConstraints(max_length=50)]] = None
-    model: Optional[Annotated[str, StringConstraints(max_length=50)]] = None
+    make: Optional[str] = Field(None, max_length=50)
+    model: Optional[str] = Field(None, max_length=50)
     year: Optional[int] = None
-    color: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
-    license_plate: Annotated[str, StringConstraints(max_length=20)]
+    color: Optional[str] = Field(None, max_length=20)
+    license_plate: str = Field(..., max_length=20)
     capacity: int
     insurance_document: Optional[str] = None
+    car_photos: Optional[List[str]] = None  # Updated to a list
 
 class VehicleCreate(VehicleBase):
-    #owner_id: int
     pass
 
 class VehicleUpdate(BaseModel):
-    make: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
-    model: Optional[Annotated[str, StringConstraints(max_length=50)]] = None
+    make: Optional[str] = Field(None, max_length=50)
+    model: Optional[str] = Field(None, max_length=50)
     year: Optional[int] = None
-    color: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
-    license_plate: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
+    color: Optional[str] = Field(None, max_length=20)
+    license_plate: Optional[str] = Field(None, max_length=20)
     capacity: Optional[int] = None
     insurance_document: Optional[str] = None
+    car_photos: Optional[List[str]] = None  # Allow updating photos
 
 class VehicleInDBBase(VehicleBase):
     id: int
@@ -149,6 +161,7 @@ class VehiclePublic(BaseModel):
     color: Optional[str] = None
     license_plate: str
     capacity: int
+    car_photos: Optional[List[str]] = None  # Include in public schema
 
     class Config:
         orm_mode = True
@@ -396,3 +409,25 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: str
+
+
+#Email confirmation
+class EmailConfirmationBase(BaseModel):
+    email: EmailStr
+
+class EmailConfirmationCreate(EmailConfirmationBase):
+    user_id: int
+    confirmation_code: str
+
+class EmailConfirmationRead(EmailConfirmationBase):
+    id: int
+    user_id: int
+    expires_at: datetime
+    created_at: datetime
+    used: bool
+
+    class Config:
+        from_attributes = True  # Enables ORM mode
+
+class EmailConfirmationUpdate(BaseModel):
+    used: bool
