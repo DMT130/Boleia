@@ -1,0 +1,11 @@
+# Ignore content of specific folders
+ProfilePicture/*
+IdentityPicture/*
+DriverPicture/*
+CredelectPicture/*
+
+# Ensure the directories themselves are tracked
+!ProfilePicture/.gitkeep
+!IdentityPicture/.gitkeep
+!DriverPicture/.gitkeep
+!CredelectPicture/.gitkeep
