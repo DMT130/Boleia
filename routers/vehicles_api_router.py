@@ -1,33 +1,100 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import schemas, utils
+import os
+from pathlib import Path
+from uuid import uuid4
 from database import get_db
 import models as routers
 from sqlalchemy.exc import IntegrityError
 from pydantic import ValidationError
 from routers.user_auth_api_router import get_current_active_user, check_admin_rights, get_current_user
 
+UPLOAD_CAR_PICTURES_DIR = "CarPictures"
+UPLOAD_CAR_INSURANCE_DIR = "CarInsurance"
+UPLOAD_CAR_OWNERSHIP_DIR = "CarOwnership"
+UPLOAD_CAR_REGISTRACTION_DIR = "CarRegistraction"
+os.makedirs(UPLOAD_CAR_PICTURES_DIR, exist_ok=True)
+os.makedirs(UPLOAD_CAR_INSURANCE_DIR, exist_ok=True)
+os.makedirs(UPLOAD_CAR_OWNERSHIP_DIR, exist_ok=True)
+os.makedirs(UPLOAD_CAR_REGISTRACTION_DIR, exist_ok=True)
+
 router = APIRouter()
 
 @router.post("/vehicles/", response_model=schemas.VehiclePublic, status_code=status.HTTP_201_CREATED)
-def create_vehicle(vehicle: schemas.VehicleCreate, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
-    #vehicle['owner_id'] = current_user.id
-    db_vehicle = routers.Vehicle(**vehicle.dict(), owner_id=current_user.id)
+async def create_vehicle(
+    make: str = Form(...),
+    model: str = Form(...),
+    year: int = Form(...),
+    color: str = Form(...),
+    license_plate: str = Form(...),
+    capacity: int = Form(...),
+    engine_size: float = Form(...),
+    insurance_document: UploadFile = File(...),
+    car_registraction_file: UploadFile = File(...),
+    car_owership_file: UploadFile = File(...),
+    car_photos: List[UploadFile] = File(...),
+    db: Session = Depends(get_db), 
+    current_user: schemas.User = Depends(get_current_user)
+):
     try:
+        # Save the insurance document
+        insurance_filename = f"{uuid4()}_{insurance_document.filename}"
+        insurance_path = Path(UPLOAD_CAR_INSURANCE_DIR) / insurance_filename
+        with open(insurance_path, "wb") as buffer:
+            buffer.write(await insurance_document.read())
+        insurance_document_url = f"CarInsurance/{insurance_filename}"
+
+        owership_filename = f"{uuid4()}_{car_owership_file.filename}"
+        ownership_path = Path(UPLOAD_CAR_OWNERSHIP_DIR) / owership_filename
+        with open(ownership_path, "wb") as buffer:
+            buffer.write(await car_owership_file.read())
+        car_owership_document_url = f"CarOwnership/{owership_filename}"
+
+        registraction_filename = f"{uuid4()}_{car_registraction_file.filename}"
+        registraction_path = Path(UPLOAD_CAR_REGISTRACTION_DIR) / registraction_filename
+        with open(registraction_path, "wb") as buffer:
+            buffer.write(await car_registraction_file.read())
+        car_registraction_document_url = f"CarRegistraction/{registraction_filename}"
+
+        # Save car photos
+        car_photos_urls = []
+        for photo in car_photos:
+            filename = f"{uuid4()}_{photo.filename}"
+            file_path = Path(UPLOAD_CAR_PICTURES_DIR) / filename
+            with open(file_path, "wb") as buffer:
+                buffer.write(await photo.read())
+            car_photos_urls.append(f"CarPictures/{filename}")
+
+        # Create vehicle entry
+        db_vehicle = routers.Vehicle(
+            owner_id=current_user.id,
+            make=make,
+            model=model,
+            year=year,
+            color=color,
+            license_plate=license_plate,
+            capacity=capacity,
+            engine_size=engine_size,
+            car_registraction_file=car_registraction_document_url,
+            car_owership_file=car_owership_document_url,
+            insurance_document=insurance_document_url,
+            car_photos=car_photos_urls  # JSONB-compatible list
+        )
+
         db.add(db_vehicle)
         db.commit()
         db.refresh(db_vehicle)
         return db_vehicle
+
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Database integrity error: {e}")
-    except ValidationError as e:
-        db.rollback()
-        raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {str(e)}")
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    
 
 @router.get("/vehicles/", response_model=List[schemas.VehiclePublic])
 def read_vehicles(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User=Depends(check_admin_rights)):

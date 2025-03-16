@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import shutil
 from routers.user_auth_api_router import get_current_active_user, get_current_user, check_admin_rights
-from email_verification import send_verification_email, generate_confirmation_code, check_confirmation_code_match, delete_confirmation_email
+from email_verification import send_verification_email, generate_confirmation_code, check_confirmation_code_match, delete_confirmation_email, get_confirmation_email_by_user_id
 
 
 UPLOAD_PROFILE_DIR = "ProfilePicture"
@@ -80,6 +80,9 @@ async def create_user(
         with open(driver_license_file_path, "wb") as buffer:
             buffer.write(await driver_license_file.read())
         driver_license_file_url = f"DriverPicture/{filename}"  # Corrigindo URL absoluta
+    else:
+        driver_license_file_url = None
+
     
     if electricity_buill_file:
         filename = f"{uuid4()}_{electricity_buill_file.filename}"  # Corrigindo erro de referência ao profile_image.filename
@@ -119,6 +122,34 @@ async def create_user(
         raise HTTPException(status_code=400, detail="Database integrity error")
     except Exception as e:
         db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@router.get("/users/confirmation/{user_id}", response_model=schemas.UserPublic)
+async def get_customer_activation_code(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only read your own user")
+    try:
+        db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        if db_user.user_is_verified is False:
+            email_conf = get_confirmation_email_by_user_id(db, user_id)
+            if email_conf:
+                deleted_cof = delete_confirmation_email(db, email_conf)
+                if deleted_cof:
+                    _, random_int = await generate_confirmation_code(db=db, user_id=db_user.id)
+                    sent = await send_verification_email(email=db_user.email, confirmation_code=random_int)
+                    if sent is True:
+                        return db_user
+            else:
+                _, random_int = await generate_confirmation_code(db=db, user_id=db_user.id)
+                sent = await send_verification_email(email=db_user.email, confirmation_code=random_int)
+                if sent is True:
+                        return db_user
+        else:
+            raise HTTPException(status_code=303, detail="user is already activated")
+        
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
     
 @router.patch("/user/confirmation/{user_id}/{confirmation_code}", response_model=schemas.UserPublic)

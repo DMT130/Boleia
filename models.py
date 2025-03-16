@@ -86,10 +86,11 @@ class Vehicle(Base):
     color = Column(String(20))
     license_plate = Column(String(20), unique=True, nullable=False)
     capacity = Column(Integer, nullable=False)
+    engine_size = Column(Float, nullable=False)
     insurance_document = Column(String(255))  # URL to document
-    car_registraction_file = Column(Text, nullable=True)
-    car_owership_file = Column(Text, nullable=True)
-    car_photos = Column(JSONB, nullable=True, default=[])  # Updated to JSONB
+    car_registraction_file = Column(Text, nullable=False)
+    car_owership_file = Column(Text, nullable=False)
+    car_photos = Column(JSONB, nullable=False, default=[])  # Updated to JSONB
     created_at = Column(DateTime, server_default=func.now())
 
     owner = relationship("User", back_populates="vehicles")

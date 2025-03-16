@@ -17,7 +17,10 @@ app.mount("/ProfilePicture", StaticFiles(directory="ProfilePicture"), name="Prof
 app.mount("/IdentityPicture", StaticFiles(directory="IdentityPicture"), name="IdentityPicture")
 app.mount("/DriverPicture", StaticFiles(directory="DriverPicture"), name="DriverPicture")
 app.mount("/CredelectPicture", StaticFiles(directory="CredelectPicture"), name="CredelectPicture")
-
+app.mount("/CarPictures", StaticFiles(directory="CarPictures"), name="CarPictures")
+app.mount("/CarInsurance", StaticFiles(directory="CarInsurance"), name="CarInsurance")
+app.mount("/CarRegistraction", StaticFiles(directory="CarRegistraction"), name="CarRegistraction")
+app.mount("/CarOwnership", StaticFiles(directory="CarOwnership"), name="CarOwnership")
 # Include routers with tags
 app.include_router(user_auth_api_router.router, tags=["Login"])
 app.include_router(user_api_router.router, tags=["Users"])

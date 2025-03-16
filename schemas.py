@@ -120,14 +120,17 @@ class UserPublic(BaseModel):
 
 #Vehicle
 class VehicleBase(BaseModel):
-    make: Optional[str] = Field(None, max_length=50)
-    model: Optional[str] = Field(None, max_length=50)
-    year: Optional[int] = None
-    color: Optional[str] = Field(None, max_length=20)
+    make: str = Field(None, max_length=50)
+    model: str = Field(None, max_length=50)
+    year: int
+    color: str = Field(None, max_length=20)
     license_plate: str = Field(..., max_length=20)
     capacity: int
-    insurance_document: Optional[str] = None
-    car_photos: Optional[List[str]] = None  # Updated to a list
+    engine_size: float
+    insurance_document: str
+    car_registraction_file: str
+    car_owership_file: str
+    car_photos: List[str]  # Updated to a list
 
 class VehicleCreate(VehicleBase):
     pass
@@ -139,7 +142,10 @@ class VehicleUpdate(BaseModel):
     color: Optional[str] = Field(None, max_length=20)
     license_plate: Optional[str] = Field(None, max_length=20)
     capacity: Optional[int] = None
+    engine_size: Optional[float] = None
     insurance_document: Optional[str] = None
+    car_registraction_file: Optional[str] = None
+    car_owership_file: Optional[str] = None
     car_photos: Optional[List[str]] = None  # Allow updating photos
 
 class VehicleInDBBase(VehicleBase):
@@ -157,11 +163,15 @@ class VehiclePublic(BaseModel):
     id: int
     make: str
     model: str
-    year: Optional[int] = None
-    color: Optional[str] = None
+    year: int
+    color: str
     license_plate: str
     capacity: int
-    car_photos: Optional[List[str]] = None  # Include in public schema
+    engine_size: float
+    insurance_document: str
+    car_registraction_file: str
+    car_owership_file: str
+    car_photos: List[str]  # Include in public schema
 
     class Config:
         orm_mode = True
