@@ -25,7 +25,7 @@ router = APIRouter()
 
 from fastapi import Form
 
-def update_user(db: Session, user: schemas.UserUpdate, user_data: schemas.User):
+def active_user(db: Session, user: schemas.UserUpdate, user_data: schemas.User):
     user = user.dict(exclude_unset=True)
     for key, value in user.items():
             setattr(user_data, key, value)
@@ -136,8 +136,8 @@ def activate_user(
         raise HTTPException(status_code=404, detail="user not found")
 
      confirmation, confirmation_obj = check_confirmation_code_match(db, user_id=user_id, confirmation_code=confirmation_code)
-     if confirmation is True:
-        result = update_user(db, user_sch, db_user)
+     if confirmation:
+        result = active_user(db, user_sch, db_user)
      else:
          raise HTTPException(status_code=403, detail="The confirmation code does not match")
      deleted_confirmation_code = delete_confirmation_email(db, confirmation_obj)

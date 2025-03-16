@@ -6,7 +6,7 @@ from pydantic import EmailStr, BaseModel
 from typing import List
 import schemas as schema
 import random
-import models
+import models, utils
 
 class EmailSchema(BaseModel):
     email: EmailStr
@@ -61,7 +61,7 @@ def delete_confirmation_email(db: Session, con_emai):
 
 async def generate_confirmation_code(db:Session, user_id: int, low: int = 100000, high: int= 999999):
     random_int = str(random.randint(low, high))
-    hash_random_int = str(hash(random_int))
+    hash_random_int = utils.hash_password(random_int)
     confirmation_obj = create_confirmation_email(db, user_id, hash_random_int)
     saved_hashed_code = confirmation_obj.confirmation_code
 
@@ -72,10 +72,10 @@ async def generate_confirmation_code(db:Session, user_id: int, low: int = 100000
 
 def check_confirmation_code_match(db:Session, user_id: int, confirmation_code: int):
     confirmation_code = str(confirmation_code)
-    hash_random_int = str(hash(confirmation_code))
     confirmation_obj = get_confirmation_email_by_user_id(db=db, user_id=user_id)
     confirmation_code_hashed = confirmation_obj.confirmation_code
-    if confirmation_code_hashed == hash_random_int:
+    confirmation = utils.verify_password(confirmation_code, confirmation_code_hashed)
+    if confirmation:
         return True, confirmation_obj
     else:
         return False, confirmation_obj
