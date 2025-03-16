@@ -3,9 +3,16 @@ ProfilePicture/*
 IdentityPicture/*
 DriverPicture/*
 CredelectPicture/*
-
+CarPictures/*
+CarInsurance/*
+CarRegistraction/*
+CarOwnership/*
 # Ensure the directories themselves are tracked
 !ProfilePicture/.gitkeep
 !IdentityPicture/.gitkeep
 !DriverPicture/.gitkeep
 !CredelectPicture/.gitkeep
+!CarPictures/.gitkeep
+!CarInsurance/.gitkeep
+!CarRegistraction/.gitkeep
+!CarOwnership/.gitkeep
