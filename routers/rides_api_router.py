@@ -7,6 +7,7 @@ import models as routers
 from shapely.wkb import loads as wkb_loads
 from sqlalchemy.exc import IntegrityError
 from geoalchemy2.shape import to_shape
+from sqlalchemy import select, func
 from shapely.wkb import loads as wkb_loads
 from shapely.wkt import loads as wkt_loads, dumps as wkt_dumps
 from routers.user_auth_api_router import get_current_active_user, check_admin_rights, get_current_user
@@ -152,3 +153,101 @@ def delete_ride(ride_id: int, db: Session = Depends(get_db), current_user: schem
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+    
+
+# Fuel price constants (consider moving to config/db)
+BASE_FUEL_PRICE = 86  # Price per liter
+FUEL_CONSUMPTION_FACTOR = 0.1  # Liters per km per engine size unit
+
+@router.post("/rides/", status_code=status.HTTP_200_OK)
+async def search_best_route(
+    passenger_search: schemas.SearchBestRoute,
+    limit: int = 3, 
+    db: Session = Depends(get_db), 
+    current_user: schemas.User = Depends(get_current_active_user)
+):
+    """
+    Find best matching rides for a passenger with price calculation
+    """
+    try:
+        # 1. Input validation and conversion
+        passenger_data = passenger_search.dict()
+        
+        # Convert to WKT with validation
+        passenger_location = utils.to_wkt(passenger_data['passenger_current_location'], "POINT")
+        passenger_route = utils.to_wkt(passenger_data['passenger_route'], "LINESTRING")
+
+        # 2. Find candidate routes
+        rides_query = select(
+            routers.Ride.id,
+            routers.Ride.waypoints,
+            routers.Ride.current_location,
+            routers.Ride.vehicle_id,
+            func.ST_HausdorffDistance(
+                func.ST_LineSubstring(
+                    routers.Ride.waypoints,
+                    func.ST_LineLocatePoint(routers.Ride.waypoints, routers.Ride.current_location),
+                    1.0
+                ),
+                func.ST_LineSubstring(
+                    passenger_route,
+                    func.ST_LineLocatePoint(passenger_route, passenger_location),
+                    func.ST_LineLocatePoint(passenger_route, func.ST_EndPoint(routers.Ride.waypoints))
+                )
+            ).label('route_similarity'),
+            func.ST_Length(
+                func.ST_LineSubstring(
+                    routers.Ride.waypoints,
+                    func.ST_LineLocatePoint(routers.Ride.waypoints, routers.Ride.current_location),
+                    1.0
+                )
+            ).label('remaining_distance')
+        ).where(
+            routers.Ride.status == 'IN_PROGRESS',
+            func.ST_LineLocatePoint(routers.Ride.waypoints, routers.Ride.current_location) < 
+            func.ST_LineLocatePoint(routers.Ride.waypoints, passenger_location)
+        ).order_by(
+            'route_similarity'  # Lower hausdorff distance = more similar
+        ).limit(limit)
+
+        candidate_rides = db.execute(rides_query).fetchall()
+
+        if not candidate_rides:
+            return []
+
+        # 3. Process results with price calculation
+        results = []
+        for ride in candidate_rides:
+            # Get vehicle details
+            vehicle = db.scalar(
+                select(routers.Vehicle).where(routers.Vehicle.id == ride.vehicle_id)
+            )
+            
+            if not vehicle:
+                continue
+
+            # Calculate price components
+            distance_km = ride.remaining_distance / 1000  # Convert meters to km
+            price = (BASE_FUEL_PRICE * distance_km * 
+                    vehicle.engine_size * FUEL_CONSUMPTION_FACTOR)
+
+            results.append(schemas.RidePublic(
+                id=ride.id,
+                waypoints=ride.waypoints,
+                current_location=ride.current_location,
+                route_similarity=ride.route_similarity,
+                price_calculate_variables={
+                    "distance_km": round(distance_km, 2),
+                    "engine_size": vehicle.engine_size,
+                    "fuel_price_per_liter": BASE_FUEL_PRICE,
+                    "estimated_price": round(price, 2)
+                }
+            ))
+
+        return results
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing ride search: {str(e)}"
+        )

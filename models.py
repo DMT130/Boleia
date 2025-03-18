@@ -104,7 +104,8 @@ class Ride(Base):
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
     start_location = Column(Geometry(geometry_type="POINT", srid=4326))  # Changed to JSONB
     end_location = Column(Geometry(geometry_type="POINT", srid=4326))    # Changed to JSONB
-    waypoints = Column(Geometry(geometry_type="LINESTRING", srid=4326))                       # Changed to JSONB for consistency
+    waypoints = Column(Geometry(geometry_type="LINESTRING", srid=4326))  # Changed to JSONB for consistency
+    current_location = Column(Geometry(geometry_type="POINT", srid=4326), nullable=True)  # New
     departure_time = Column(DateTime, nullable=False)
     available_seats = Column(Integer, nullable=False)
     price_per_seat = Column(Float, nullable=False)

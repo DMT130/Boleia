@@ -441,3 +441,10 @@ class EmailConfirmationRead(EmailConfirmationBase):
 
 class EmailConfirmationUpdate(BaseModel):
     used: bool
+
+
+class SearchBestRoute(BaseModel):
+    #car_current_location: List[float]
+    #xcar_route: List[List[float]]
+    passanger_current_location: List[float]
+    passanger_route: List[List[float]]
