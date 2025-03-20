@@ -155,90 +155,151 @@ def delete_ride(ride_id: int, db: Session = Depends(get_db), current_user: schem
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
     
 
-# Fuel price constants (consider moving to config/db)
+from sqlalchemy import select, func, case, text, cast
+from geoalchemy2.types import Geography
+from geoalchemy2.functions import (
+    ST_LineSubstring,
+    ST_LineLocatePoint,
+    ST_HausdorffDistance,
+    ST_DWithin,
+    ST_Length,
+    ST_EndPoint,
+    ST_Contains
+)
+
+# Configuration
 BASE_FUEL_PRICE = 86  # Price per liter
 FUEL_CONSUMPTION_FACTOR = 0.1  # Liters per km per engine size unit
+MAX_DISTANCE_METERS = 500  # Maximum pickup distance
 
-@router.post("/rides/", status_code=status.HTTP_200_OK)
+@router.post("/rides/search/", 
+             status_code=status.HTTP_200_OK, 
+             response_model=List[schemas.RidePublic])
 async def search_best_route(
     passenger_search: schemas.SearchBestRoute,
-    limit: int = 3, 
-    db: Session = Depends(get_db), 
+    limit: int = 3,
+    db: Session = Depends(get_db),
     current_user: schemas.User = Depends(get_current_active_user)
 ):
     """
-    Find best matching rides for a passenger with price calculation
+    Find best matching rides with:
+    - Route similarity comparison
+    - Proposed dropoff point
+    - Shared distance calculation
+    - Price estimation
     """
     try:
-        # 1. Input validation and conversion
-        passenger_data = passenger_search.dict()
-        
-        # Convert to WKT with validation
-        passenger_location = utils.to_wkt(passenger_data['passenger_current_location'], "POINT")
-        passenger_route = utils.to_wkt(passenger_data['passenger_route'], "LINESTRING")
+        # Convert input to WKT with validation
+        passenger_loc = utils.to_wkt(passenger_search.passenger_current_location, "POINT")
+        passenger_route = utils.to_wkt(passenger_search.passenger_route, "LINESTRING")
+        passenger_end = func.ST_EndPoint(passenger_route)
 
-        # 2. Find candidate routes
-        rides_query = select(
-            routers.Ride.id,
-            routers.Ride.waypoints,
-            routers.Ride.current_location,
-            routers.Ride.vehicle_id,
-            func.ST_HausdorffDistance(
-                func.ST_LineSubstring(
-                    routers.Ride.waypoints,
-                    func.ST_LineLocatePoint(routers.Ride.waypoints, routers.Ride.current_location),
-                    1.0
+        # Main query for candidate rides
+        rides_query = (
+            select(
+                routers.Ride.id,
+                routers.Ride.waypoints,
+                routers.Ride.current_location,
+                routers.Ride.vehicle_id,
+
+                # Proposed dropoff logic
+                case(
+                    [
+                        (
+                            ST_Contains(routers.Ride.waypoints, passenger_end),
+                            passenger_end
+                        )
+                    ],
+                    else_=ST_EndPoint(
+                        ST_LineSubstring(
+                            routers.Ride.waypoints,
+                            ST_LineLocatePoint(routers.Ride.waypoints, 
+                                             routers.Ride.current_location),
+                            1.0
+                        )
+                    )
+                ).label('proposed_dropoff'),
+
+                # Shared route calculation
+                ST_Length(
+                    cast(
+                        ST_LineSubstring(
+                            routers.Ride.waypoints,
+                            ST_LineLocatePoint(routers.Ride.waypoints, 
+                                             routers.Ride.current_location),
+                            ST_LineLocatePoint(routers.Ride.waypoints, 
+                                             case(
+                                                 [
+                                                     (
+                                                         ST_Contains(routers.Ride.waypoints, passenger_end),
+                                                         passenger_end
+                                                     )
+                                                 ],
+                                                 else_=ST_EndPoint(routers.Ride.waypoints)
+                                             ))
+                        ),
+                        Geography
+                    )
+                ).label('shared_distance'),
+
+                # Route similarity score
+                (1 / (1 + ST_HausdorffDistance(
+                    ST_LineSubstring(
+                        routers.Ride.waypoints,
+                        ST_LineLocatePoint(routers.Ride.waypoints, 
+                                         routers.Ride.current_location),
+                        1.0
+                    ),
+                    passenger_route
+                ))).label('similarity_score')
+            )
+            .where(
+                routers.Ride.status == 'IN_PROGRESS',
+                ST_DWithin(
+                    cast(routers.Ride.waypoints, Geography),
+                    cast(passenger_loc, Geography),
+                    MAX_DISTANCE_METERS
                 ),
-                func.ST_LineSubstring(
-                    passenger_route,
-                    func.ST_LineLocatePoint(passenger_route, passenger_location),
-                    func.ST_LineLocatePoint(passenger_route, func.ST_EndPoint(routers.Ride.waypoints))
-                )
-            ).label('route_similarity'),
-            func.ST_Length(
-                func.ST_LineSubstring(
-                    routers.Ride.waypoints,
-                    func.ST_LineLocatePoint(routers.Ride.waypoints, routers.Ride.current_location),
-                    1.0
-                )
-            ).label('remaining_distance')
-        ).where(
-            routers.Ride.status == 'IN_PROGRESS',
-            func.ST_LineLocatePoint(routers.Ride.waypoints, routers.Ride.current_location) < 
-            func.ST_LineLocatePoint(routers.Ride.waypoints, passenger_location)
-        ).order_by(
-            'route_similarity'  # Lower hausdorff distance = more similar
-        ).limit(limit)
+                ST_LineLocatePoint(routers.Ride.waypoints, routers.Ride.current_location) < 
+                ST_LineLocatePoint(routers.Ride.waypoints, passenger_loc)
+            )
+            .order_by(text("similarity_score DESC"))
+            .limit(limit)
+        )
 
         candidate_rides = db.execute(rides_query).fetchall()
 
         if not candidate_rides:
             return []
 
-        # 3. Process results with price calculation
+        # Batch fetch vehicle details
+        vehicle_ids = [ride.vehicle_id for ride in candidate_rides]
+        vehicles = db.execute(
+            select(routers.Vehicle.id, routers.Vehicle.engine_size)
+            .where(routers.Vehicle.id.in_(vehicle_ids))
+        ).fetchall()
+        vehicle_map = {v.id: v.engine_size for v in vehicles}
+
+        # Process results with price calculation
         results = []
         for ride in candidate_rides:
-            # Get vehicle details
-            vehicle = db.scalar(
-                select(routers.Vehicle).where(routers.Vehicle.id == ride.vehicle_id)
-            )
-            
-            if not vehicle:
-                continue
+            engine_size = vehicle_map.get(ride.vehicle_id)
+            if not engine_size:
+                continue  # Skip rides with missing vehicle data
 
-            # Calculate price components
-            distance_km = ride.remaining_distance / 1000  # Convert meters to km
-            price = (BASE_FUEL_PRICE * distance_km * 
-                    vehicle.engine_size * FUEL_CONSUMPTION_FACTOR)
+            # Calculate price using shared distance
+            distance_km = ride.shared_distance / 1000
+            price = BASE_FUEL_PRICE * distance_km * engine_size * FUEL_CONSUMPTION_FACTOR
 
             results.append(schemas.RidePublic(
                 id=ride.id,
                 waypoints=ride.waypoints,
                 current_location=ride.current_location,
-                route_similarity=ride.route_similarity,
+                proposed_dropoff=ride.proposed_dropoff,
+                similarity_score=round(float(ride.similarity_score), 2),
                 price_calculate_variables={
                     "distance_km": round(distance_km, 2),
-                    "engine_size": vehicle.engine_size,
+                    "engine_size": engine_size,
                     "fuel_price_per_liter": BASE_FUEL_PRICE,
                     "estimated_price": round(price, 2)
                 }
@@ -249,5 +310,5 @@ async def search_best_route(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing ride search: {str(e)}"
+            detail=f"Ride search failed: {str(e)}"
         )

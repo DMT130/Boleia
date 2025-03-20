@@ -26,24 +26,15 @@ class PaymentStatus(str, Enum):
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
 
-class UserBase(BaseModel):
-    email: EmailStr
-    full_name: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    phone: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
-    identity_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    driver_license: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    electricity_buill_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    role: UserRole = UserRole.BOTH
-    user_is_verified: bool = False
-    documents_is_verified: bool = False
+#Documents
+class UserDocuments(BaseModel):
+    id: int
     profile_image: Optional[str] = None
     identity_id_file: Optional[str] = None
     driver_license_file: Optional[str] = None
     electricity_buill_file: Optional[str] = None
-
-class UserCreate(UserBase):
-    hashed_password: str
-
+    
+class UserDocumentsCreate(BaseModel):
     # Convert HttpUrl to str when exporting
     def dict(self, **kwargs):
         data = super().dict(**kwargs)
@@ -56,38 +47,49 @@ class UserCreate(UserBase):
         if self.driver_license_file:
             data["electricity_buill_file"] = str(self.driver_license_file)
         return data
-    
-class UserActivation(BaseModel):
-    user_is_verified: Optional[bool] = None
 
-class UserUpdate(BaseModel):
-    full_name: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    phone: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
-    role: Optional[UserRole] = None
-    identity_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    driver_license: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    electricity_buill_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
-    user_is_verified: Optional[bool] = None
-    documents_is_verified: Optional[bool] = None
+class UserDocumentsUpdate(BaseModel):
     profile_image: Optional[str] = None
     identity_id_file: Optional[str] = None
     driver_license_file: Optional[str] = None
     electricity_buill_file: Optional[str] = None
 
-    def dict(self, **kwargs):
-        data = super().dict(**kwargs)
-        if self.profile_image:
-            data["profile_image"] = str(self.profile_image)
-        if self.identity_id_file:
-            data["identity_id_file"] = str(self.identity_id_file)
-        if self.driver_license_file:
-            data["driver_license_file"] = str(self.driver_license_file)
-        return data
+#Users
+class UserBase(BaseModel):
+    full_name: str
+    email: str
+    phone: str
+    nuit: Optional[str] = None
+    identity_id: str
+    driver_license: str
+    electricity_buill_id: str
+
+class UserCreate(UserBase):
+    password: str
+    
+class UserActivation(BaseModel):
+    user_is_verified: Optional[bool] = None
+
+class UserDocumentsActivation(BaseModel):
+    documents_is_verified: Optional[bool] = None
+    
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    full_name: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+    phone: Optional[Annotated[str, StringConstraints(max_length=20)]] = None
+    nuit: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+    identity_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+    driver_license: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+    electricity_buill_id: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+
 
 class UserInDBBase(UserBase):
     id: int
     created_at: datetime
+    role: UserRole = UserRole.BOTH
     updated_at: Optional[datetime] = None
+    user_is_verified: Optional[bool] = False
+    documents_is_verified: Optional[bool] = False
 
     class Config:
         orm_mode = True
@@ -104,8 +106,9 @@ class UserPublic(BaseModel):
     full_name: str
     phone: Optional[str] = None
     identity_id: str
+    nuit: str
+    electricity_buill_id: str
     driver_license: Optional[str] = None
-    electricity_buill_file: Optional[str] = None
     role: UserRole
     user_is_verified: bool
     documents_is_verified: bool
@@ -444,7 +447,11 @@ class EmailConfirmationUpdate(BaseModel):
 
 
 class SearchBestRoute(BaseModel):
-    #car_current_location: List[float]
-    #xcar_route: List[List[float]]
+
     passanger_current_location: List[float]
     passanger_route: List[List[float]]
+
+class SearchRouteResults(BaseModel):
+    ride_id: int
+    best_ride_: List[List[float]]
+    ride_price: float

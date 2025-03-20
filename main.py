@@ -7,11 +7,22 @@ from routers import (user_api_router, booking_api_router, group_api_router,
                      )
 
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 # Create the database tables
 #Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins, you can replace with a list of specific origins if needed
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
+
 
 app.mount("/ProfilePicture", StaticFiles(directory="ProfilePicture"), name="ProfilePicture")
 app.mount("/IdentityPicture", StaticFiles(directory="IdentityPicture"), name="IdentityPicture")

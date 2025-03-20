@@ -34,6 +34,38 @@ def active_user(db: Session, user: schemas.UserUpdate, user_data: schemas.User):
     db.refresh(user_data)
     return user_data
 
+@router.post("/users/signup", response_model=schemas.UserPublic, status_code=201)
+async def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    
+    hashed_password = utils.hash_password(user.password)
+    db_user = routers.User(
+        full_name=user.full_name,
+        email=user.email,
+        password=hashed_password,
+        phone=user.phone,
+        nuit=user.nuit,
+        driver_license=user.driver_license,
+        identity_id=user.identity_id,
+        electricity_buill_id=user.electricity_buill_id
+    )
+    try:
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        _, random_int = await generate_confirmation_code(db=db, user_id=db_user.id)
+        sent = await send_verification_email(email=db_user.email, confirmation_code=random_int)
+        if sent is True:
+            return db_user
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {e}")
+    except ValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
 @router.post("/users/", response_model=schemas.UserPublic, status_code=201)
 async def create_user(
     email: str = Form(...),
@@ -224,6 +256,24 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
+@router.delete("/users/{user_id}", response_model=dict)
+def delete_user(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+    if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only activate your own user")
+    db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        db.delete(db_user)
+        db.commit()
+        return {"message": "User deleted successfully"}
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {e}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
 @router.get("/users/identity_picture/{user_id}")
 async def read_identity_picture(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
     if current_user.id != user_id:
@@ -277,21 +327,155 @@ async def read_credelect_picture(user_id: int, db: Session = Depends(get_db), cu
         return FileResponse(electricity_buill_file)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+    
 
-@router.delete("/users/{user_id}", response_model=dict)
-def delete_user(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
+@router.post("/users/credelect_picture/{user_id}", response_model=schemas.UserPublic)
+async def upload_or_update_credelect_picture(
+    user_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user)
+):
     if current_user.id != user_id:
-         raise HTTPException(status_code=403, detail="You can only activate your own user")
-    db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
-    if db_user is None:
+        raise HTTPException(status_code=403, detail="You can only upload your own file")
+
+    user_data = db.query(routers.User).filter(routers.User.id == user_id).first()
+    if not user_data:
         raise HTTPException(status_code=404, detail="User not found")
+
     try:
-        db.delete(db_user)
+        # Save the uploaded file
+        filename = f"{uuid4()}_{file.filename}"  # Corrigindo erro de referência ao profile_image.filename
+        electricity_bill_file_path = Path(UPLOAD_ELECTRICITY_BILL_DIR) / filename
+        with open(electricity_bill_file_path, "wb") as buffer:
+            buffer.write(await file.read())
+        electricity_bill_file = f"CredelectPicture/{filename}"  # Corrigindo URL absoluta
+
+        # Update DB with file path
+        user_data.electricity_buill_file = electricity_bill_file
         db.commit()
-        return {"message": "User deleted successfully"}
+        db.refresh(user_data)
+        return user_data
     except IntegrityError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Database integrity error: {e}")
+    except ValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+
+@router.post("/users/driver_license_picture/{user_id}", response_model=schemas.UserPublic)
+async def upload_or_update_driver_license_picture(
+    user_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user)
+):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="You can only upload your own file")
+
+    user_data = db.query(routers.User).filter(routers.User.id == user_id).first()
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        # Save the uploaded file
+        filename = f"{uuid4()}_{file.filename}"  # Corrigindo erro de referência ao profile_image.filename
+        driver_license_picture_path = Path(UPLOAD_DRIVER_LICENSE_DIR) / filename
+        with open(driver_license_picture_path, "wb") as buffer:
+            buffer.write(await file.read())
+        driver_license_file = f"DriverPicture/{filename}"  # Corrigindo URL absoluta
+
+        # Update DB with file path
+        user_data.driver_license_file = driver_license_file
+        db.commit()
+        db.refresh(user_data)
+        return user_data
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {e}")
+    except ValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+
+@router.post("/users/profile_image/{user_id}", response_model=schemas.UserPublic)
+async def upload_or_update_profile_image(
+    user_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user)
+):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="You can only upload your own file")
+
+    user_data = db.query(routers.User).filter(routers.User.id == user_id).first()
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        # Save the uploaded file
+        filename = f"{uuid4()}_{file.filename}"  # Corrigindo erro de referência ao profile_image.filename
+        profile_image_path = Path(UPLOAD_PROFILE_DIR) / filename
+        with open(profile_image_path, "wb") as buffer:
+            buffer.write(await file.read())
+        profile_image = f"ProfilePicture/{filename}"  # Corrigindo URL absoluta
+
+        # Update DB with file path
+        user_data.profile_image = profile_image
+        db.commit()
+        db.refresh(user_data)
+        return user_data
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {e}")
+    except ValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+    
+
+@router.post("/users/identity_id/{user_id}", response_model=schemas.UserPublic)
+async def upload_or_update_identity_id(
+    user_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user)
+):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="You can only upload your own file")
+
+    user_data = db.query(routers.User).filter(routers.User.id == user_id).first()
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        # Save the uploaded file
+        filename = f"{uuid4()}_{file.filename}"  # Corrigindo erro de referência ao profile_image.filename
+        identity_id_file_path = Path(UPLOAD_IDENTITY_DIR) / filename
+        with open(identity_id_file_path, "wb") as buffer:
+            buffer.write(await file.read())
+        identity_id_file = f"IdentityPicture/{filename}"  # Corrigindo URL absoluta
+
+        # Update DB with file path
+        user_data.identity_id_file = identity_id_file
+        db.commit()
+        db.refresh(user_data)
+        return user_data
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {e}")
+    except ValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
