@@ -65,98 +65,9 @@ async def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
-
-@router.post("/users/", response_model=schemas.UserPublic, status_code=201)
-async def create_user(
-    email: str = Form(...),
-    full_name: Optional[str] = Form(None),
-    phone: Optional[str] = Form(None),
-    identity_id: Optional[str] = Form(None),
-    driver_license: Optional[str] = Form(None),
-    electricity_buill_id: Optional[str] = Form(None),
-    role: schemas.UserRole = Form(...),
-    user_is_verified: bool = Form(False),
-    documents_is_verified: bool = Form(False),
-    hashed_password: str = Form(...),
-    profile_image: UploadFile = File(...),
-    identity_id_file: UploadFile = File(...),
-    driver_license_file: Optional[UploadFile] = File(None),
-    electricity_buill_file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
-):
-    # Check if email is already registered
-    db_user = db.query(routers.User).filter(routers.User.email == email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    # Hash password
-    hashed_password_hashed = utils.hash_password(hashed_password)
-
-    if profile_image:
-        filename = f"{uuid4()}_{profile_image.filename}"
-        profile_path = Path(UPLOAD_PROFILE_DIR) / filename
-        with open(profile_path, "wb") as buffer:
-            buffer.write(await profile_image.read())
-        profile_image_url = f"ProfilePicture/{filename}"  # Corrigindo URL absoluta
-
-    if identity_id_file:
-        filename = f"{uuid4()}_{identity_id_file.filename}"
-        identity_id_file_path = Path(UPLOAD_IDENTITY_DIR) / filename
-        with open(identity_id_file_path, "wb") as buffer:
-            buffer.write(await identity_id_file.read())
-        identity_id_file_url = f"IdentityPicture/{filename}"  # Corrigindo URL absoluta
-
-    if driver_license_file:
-        filename = f"{uuid4()}_{driver_license_file.filename}"  # Corrigindo erro de referência ao profile_image.filename
-        driver_license_file_path = Path(UPLOAD_DRIVER_LICENSE_DIR) / filename
-        with open(driver_license_file_path, "wb") as buffer:
-            buffer.write(await driver_license_file.read())
-        driver_license_file_url = f"DriverPicture/{filename}"  # Corrigindo URL absoluta
-    else:
-        driver_license_file_url = None
-
     
-    if electricity_buill_file:
-        filename = f"{uuid4()}_{electricity_buill_file.filename}"  # Corrigindo erro de referência ao profile_image.filename
-        electricity_bill_file_path = Path(UPLOAD_ELECTRICITY_BILL_DIR) / filename
-        with open(electricity_bill_file_path, "wb") as buffer:
-            buffer.write(await electricity_buill_file.read())
-        electricity_bill_file = f"CredelectPicture/{filename}"  # Corrigindo URL absoluta
 
-    # Criar novo usuário
-    db_user = routers.User(
-        email=email,
-        full_name=full_name,
-        phone=phone,
-        identity_id=identity_id,
-        driver_license=driver_license,
-        electricity_buill_id=electricity_buill_id,
-        role=role,
-        user_is_verified=user_is_verified,
-        documents_is_verified=documents_is_verified,
-        hashed_password=hashed_password_hashed,
-        profile_image=profile_image_url,
-        identity_id_file=identity_id_file_url,
-        driver_license_file=driver_license_file_url,
-        electricity_buill_file=electricity_bill_file
-    )
-
-    try:
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
-        _, random_int = await generate_confirmation_code(db=db, user_id=db_user.id)
-        sent = await send_verification_email(email=db_user.email, confirmation_code=random_int)
-        if sent is True:
-            return db_user
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Database integrity error")
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
-
-@router.get("/users/confirmation/{user_id}", response_model=schemas.UserPublic)
+@router.get("/users/generate_user_activation_code/{user_id}", response_model=schemas.UserPublic)
 async def get_customer_activation_code(user_id: int, db: Session = Depends(get_db), current_user: schemas.User=Depends(get_current_user)):
     if current_user.id != user_id:
          raise HTTPException(status_code=403, detail="You can only read your own user")
@@ -184,7 +95,8 @@ async def get_customer_activation_code(user_id: int, db: Session = Depends(get_d
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
     
-@router.patch("/user/confirmation/{user_id}/{confirmation_code}", response_model=schemas.UserPublic)
+
+@router.patch("/user/activate_user/{user_id}/{confirmation_code}", response_model=schemas.UserPublic)
 def activate_user(
     user_id: int,
     confirmation_code: int,
@@ -208,6 +120,31 @@ def activate_user(
          return result
      else:
          raise HTTPException(status_code=403, detail="confirmation code was not deleted")
+
+
+
+
+@router.patch("/user/documents_confirmation/{user_id}", response_model=schemas.UserPublic)
+def activate_user_documents(
+    user_id: int,
+    user_sch: schemas.UserDocumentsActivation,
+    current_user: schemas.User = Depends(check_admin_rights),  # Move this up
+    db: Session = Depends(get_db)
+    ):
+     if current_user.id != user_id:
+         raise HTTPException(status_code=403, detail="You can only activate you own user")
+     db_user = db.query(routers.User).filter(routers.User.id == user_id).first()
+     if not db_user:
+        raise HTTPException(status_code=404, detail="user not found")
+     if db_user.profile_image is not None and db_user.identity_id_file is not None and db_user.electricity_buill_file is not None:
+        result = active_user(db, user_sch, db_user)
+        if result:
+            return result
+        else:
+            raise HTTPException(status_code=403, detail="documents were not confirmed")
+     else:
+            raise HTTPException(status_code=403, detail="one or more documents are not present")
+     
 
 @router.get("/users/", response_model=List[schemas.UserPublic])
 def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User=Depends(check_admin_rights)):

@@ -26,34 +26,6 @@ class PaymentStatus(str, Enum):
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
 
-#Documents
-class UserDocuments(BaseModel):
-    id: int
-    profile_image: Optional[str] = None
-    identity_id_file: Optional[str] = None
-    driver_license_file: Optional[str] = None
-    electricity_buill_file: Optional[str] = None
-    
-class UserDocumentsCreate(BaseModel):
-    # Convert HttpUrl to str when exporting
-    def dict(self, **kwargs):
-        data = super().dict(**kwargs)
-        if self.profile_image:
-            data["profile_image"] = str(self.profile_image)
-        if self.identity_id_file:
-            data["identity_id_file"] = str(self.identity_id_file)
-        if self.driver_license_file:
-            data["driver_license_file"] = str(self.driver_license_file)
-        if self.driver_license_file:
-            data["electricity_buill_file"] = str(self.driver_license_file)
-        return data
-
-class UserDocumentsUpdate(BaseModel):
-    profile_image: Optional[str] = None
-    identity_id_file: Optional[str] = None
-    driver_license_file: Optional[str] = None
-    electricity_buill_file: Optional[str] = None
-
 #Users
 class UserBase(BaseModel):
     full_name: str
